@@ -51,6 +51,7 @@ pico_enable_stdio_usb(firmware 1)
 target_link_libraries(firmware
         pico_stdlib
         hardware_adc
+        hardware_irq
         freertos
 )
 

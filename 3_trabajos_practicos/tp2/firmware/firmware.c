@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "hardware/adc.h"
+#include "hardware/irq.h"
 
 #include "freertos.h"
 #include "task.h"
@@ -10,15 +11,30 @@
 QueueHandle_t queue_sensor;
 
 /**
- * @brief Tarea de lectura del sensor de temperatura
+ * @brief Interrupción del ADC
  */
-void task_lectura(void *params) {
-    uint16_t sensor;
+void adc_irq_handler(void) {
+    // Variable para cambio de contexto 
+    BaseType_t to_higher_priority_task;
+    // Leo el registro FIFO
+    uint16_t sensor = adc_fifo_get();
+    // Detengo el ADC
+    adc_run(0);
+    // Limpio el buffer 
+    adc_fifo_drain();
+    // Envio el dato a la cola
+    xQueueSendToBackFromISR(queue_sensor, &sensor, &to_higher_priority_task);
+    // Cambia el contexto si es necesario
+    portYIELD_FROM_ISR(to_higher_priority_task);
+}
+
+/**
+ * @brief Tarea que dispara la lectura del ADC
+ */
+void task_disparo_adc(void *params) {
     while(1) {
-        // Leo el sensor
-        sensor = adc_read();
-        // Envio el dato a la cola
-        xQueueSendToBack(queue_sensor, &sensor, portMAX_DELAY);
+        // Disparo el ADC
+        adc_run(1);
         vTaskDelay(pdMS_TO_TICKS(500));  
     }
 }
@@ -46,12 +62,20 @@ int main() {
     adc_set_temp_sensor_enabled(1);
     // Selecciono el sensor de temperatura
     adc_select_input(4);
+    // Configuro la FIFO para la interrupción con 1 dato
+    adc_fifo_setup(1, 0, 1, 0, 0);
+    // Habilito la interrupción del ADC
+    adc_irq_set_enabled(1);
+    // Especifico el handler de la interrupción
+    irq_set_exclusive_handler(ADC_IRQ_FIFO, adc_irq_handler);
+    // Habilito la interrupción del ADC
+    irq_set_enabled(ADC_IRQ_FIFO, 1);
     // Creo la cola con longitud 1
     queue_sensor = xQueueCreate(1, sizeof(uint16_t));
     // Creo la tarea de lectura del ADC
     xTaskCreate(
-        task_lectura, 
-        "task_lectura", 
+        task_disparo_adc, 
+        "task_disparo_adc", 
         configMINIMAL_STACK_SIZE, 
         NULL, 
         tskIDLE_PRIORITY + 1, 
@@ -62,7 +86,7 @@ int main() {
     xTaskCreate(
         task_escritura, 
         "task_escritura", 
-        configMINIMAL_STACK_SIZE*2, 
+        configMINIMAL_STACK_SIZE * 2, 
         NULL, 
         tskIDLE_PRIORITY + 1, 
         NULL
