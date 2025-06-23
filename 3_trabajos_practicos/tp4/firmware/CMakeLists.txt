@@ -57,6 +57,7 @@ pico_enable_stdio_usb(firmware 1)
 target_link_libraries(firmware
         pico_stdlib
         hardware_i2c
+        hardware_pwm
         freertos
         bmp280
         lcd)
