@@ -39,6 +39,12 @@ add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../lcd ${CMAKE_BINARY_DIR}/lcd)
 # Añadir la subcarpeta donde está la biblioteca FreeRTOS
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../freertos ${CMAKE_BINARY_DIR}/freertos)
 
+# Añadir la subcarpeta donde está la biblioteca RTC
+add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../rtc ${CMAKE_BINARY_DIR}/rtc)
+
+# Añadir la subcarpeta donde está la biblioteca FatFs_SPI
+add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../fatfs_spi ${CMAKE_BINARY_DIR}/fatfs_spi)
+
 # Add executable. Default name is the project name, version 0.1
 
 add_executable(firmware firmware.c )
@@ -55,6 +61,10 @@ target_link_libraries(firmware
         pico_stdlib
         lcd
         freertos
+        rtc
+        fatfs_spi
+        hardware_i2c
+        hardware_spi
         hardware_pwm
         hardware_clocks
 )

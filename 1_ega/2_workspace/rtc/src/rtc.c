@@ -76,7 +76,7 @@ void rtc_set_time(time_t time) {
     uint8_t data[] = {
         RTC_SECONDS,
         dec2bcd(time.second),
-        dec2bcd(t.minute),
+        dec2bcd(time.minute),
         dec2bcd(time.hour),
         dec2bcd(time.day),
         dec2bcd(time.date),
