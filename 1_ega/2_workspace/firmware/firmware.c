@@ -254,7 +254,7 @@ void task_control(void *params) {
                     gpio_put(IN4, 1);
                     // Dejamos 500ms frenado
                     vTaskDelay(pdMS_TO_TICKS(500));
-                    if(gpio_get(IN3) == 1) {
+                    if(velocidad_objetivo_actual > 0) {
                         gpio_put(IN3, 0);
                         gpio_put(IN4, 1);
                     }
@@ -731,7 +731,7 @@ void task_datalogger(void *params) {
                     for(datos = 0; datos < 5; datos++) { 
                         //Guardamos los 5 datos
                         sprintf(buffer,"%02d/%02d/%04d;%02d:%02d:%02d;%4.0f;%6.1f;%3.1f;%c\n",
-                            horas[datos].day, horas[datos].month, horas[datos].year,
+                            horas[datos].date, horas[datos].month, horas[datos].year,
                             horas[datos].hour, horas[datos].minute, horas[datos].second,
                             velocidades[datos], frecuencias[datos], dc[datos], sentido[datos]);
                         resultado = f_write(&file, buffer, strlen(buffer), &bw);
@@ -932,12 +932,12 @@ void task_seteo(void *params) {
                 switch(unidad) {
                     case 1:
                         if(encoder.sentido == 1) {
-                            hora.day++;
-                            if(hora.day == 32) hora.day = 1;
+                            hora.date++;
+                            if(hora.date == 32) hora.date = 1;
                         }
                         else {
-                            hora.day--;
-                            if(hora.day == 0) hora.day = 31;
+                            hora.date--;
+                            if(hora.date == 0) hora.date = 31;
                         }
                         break;
                     case 2:
@@ -996,7 +996,7 @@ void task_seteo(void *params) {
         
         // Mostramos la hora medida o modificada
         lcd_set_cursor(0, 0);
-        sprintf(fecha, "%02d/%02d/%02d", hora.day, hora.month, hora.year - 2000);
+        sprintf(fecha, "%02d/%02d/%02d", hora.date, hora.month, hora.year - 2000);
         lcd_string(fecha);
         lcd_set_cursor(1, 0);
         sprintf(fecha, "%02d:%02d:%02d", hora.hour, hora.minute, hora.second);
