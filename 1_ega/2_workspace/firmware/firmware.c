@@ -640,12 +640,13 @@ void task_datalogger(void *params) {
                 datos = 0; // Reseteamos el indice de los datos guardados
 
                 if(archivo == true) { // En caso de que ya se haya creado el archivo verificamos si se cambió de SD
-                    resultado = f_open(&file, nombre_archivo, FA_WRITE | FA_OPEN_APPEND); // Tratamos de abrir para agregar más datos
+                    resultado = f_open(&file, nombre_archivo, FA_WRITE | FA_OPEN_EXISTING); // Tratamos de abrir para agregar más datos
                     if(resultado == FR_OK) { // Se reconectó la SD
                         mensaje_sd = 3;
                         xQueueSendToBack(cola_mensaje_sd, &mensaje_sd, portMAX_DELAY);
                     }
                     else { // Se conectó otra SD
+                        resultado = f_lseek(&file, f_size(&file));
                         archivo = false; 
                         archivo_pid = false;
                     }
@@ -654,12 +655,9 @@ void task_datalogger(void *params) {
                 if(archivo_pid == false) { // Si no se creo el archivo de datos de PID lo creamos
                     archivo_pid = true;
                     resultado = f_open(&file, "pid.txt", FA_OPEN_ALWAYS | FA_WRITE);
-                    if(resultado != FR_OK) printf("Error");
                     resultado = f_lseek(&file, f_size(&file));
-                    if(resultado != FR_OK) printf("Error");
                     sprintf(buffer, "kp = %.1f; ki = %.1f; kd = %.3f\n", pid.kp, pid.ki, pid.kd);
                     resultado = f_write(&file, buffer, strlen(buffer), &bw);
-                    if(resultado != FR_OK) printf("Error");
                     f_close(&file);
                 }
 
