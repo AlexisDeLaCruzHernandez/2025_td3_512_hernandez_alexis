@@ -26,11 +26,9 @@
 #define SENSOR_IR 18                    // Salida del sensor IR
 #define SENTIDO 15                      // Botón para cambio de sentido
 #define CALIBRAR 14                     // Botón para ajustar PID
-#define CLK 13                          // Pin CLK del encoder
-#define DT 12                           // Pin DT del encoder
-#define SW 11                           // Pin del botón del encoder
-#define LED_HORARIO 9                   // Pin de led sentido horario
-#define LED_ANTIHORARIO 10              // Pin de led sentido antihorario
+#define CLK 11                          // Pin CLK del encoder
+#define DT 10                           // Pin DT del encoder
+#define SW 9                            // Pin del botón del encoder
 
 #define T_MUESTREO 120                  // Tiempo de muestreo en ms
 #define T_PID 40                        // Tiempo de actualizacion del PID
@@ -54,21 +52,14 @@ typedef enum {                          // Distintos eventos posibles para la ta
     EVENTO_CALIBRAR,                    // Evento boton calibrar
 } evento_t;
 
-typedef struct {                        // Estructura para la velocidad
-    float velocidad;                 // Guarda la velocidad en RPM
-    float frecuencia;                   // Guarda la frecuencia en Hz
-} sensor_t;
-
 typedef struct {                        // Estructura para la cola de la tarea central
     evento_t evento;                    // Evento
-    sensor_t sensor;                    // Velocidad y frecuencia
     float velocidad;                    // Velocidad en RPM
     int8_t sentido;                     // Sentido del encoder (1 horario, -1 antihorario)
     bool sw;                            // Pulsador del encoder (0 pulsado, 1 mantenido)
 } central_t;
 
 typedef struct {                        // Estructura con datos a mostrar
-    bool cambio;                        // Cambio en la configuracion para control
     uint8_t menu;                       // Menu a mostrar
     int16_t velocidad_objetivo;         // Velocidad objetivo (menu 0)
     float velocidad_medida;             // Velocidad medida (menu 0)
@@ -76,7 +67,7 @@ typedef struct {                        // Estructura con datos a mostrar
     float t_desaceleracion;             // Tiempo de desaceleracion (menu 1)
 } configuracion_t;
 
-typedef struct {
+typedef struct {                        // Estructura para los parametros del PID
     float kp;
     float ki;
     float kd;
@@ -131,7 +122,7 @@ void gpio_irq_handler(uint gpio, uint32_t event_mask) {
 
 /**
  * @brief Tarea que calcula la velocidad y la envía por una cola
- * Envia el mensaje de EVENTO_VELOCIDAD y en mensaje.sensor la frecuencia y velocidad
+ * Envia el mensaje de EVENTO_VELOCIDAD y en mensaje.velocidad la velocidad del motor
  */
 void task_velocidad(void *params) {
     central_t mensaje;
@@ -148,7 +139,7 @@ void task_velocidad(void *params) {
         
         mensaje.velocidad = (float)(pulsos * 60000) / (T_MUESTREO * RANURAS); // Calculo de velocidad en RPM
 
-        if(gpio_get(IN3) == 1) mensaje.velocidad = -mensaje.velocidad;
+        if(gpio_get(IN3) == 1) mensaje.velocidad = -mensaje.velocidad; // Verificamos el sentido de giro
         
         xQueueSendToFront(cola_central, &mensaje, portMAX_DELAY); // Enviamos al frente para dar prioridad
     }
@@ -156,12 +147,12 @@ void task_velocidad(void *params) {
 
 /**
  * @brief Tarea que hacer las rampas y ajusta el PWM (PID)
+ * Espera el tiempo de calculo del PID, evalua el set point de acuerdo a la configuracion y aplica el PID
  */
 void task_control(void *params) {
     configuracion_t configuracion;
     parametros_t pid;
 
-    configuracion.cambio = 0;
     configuracion.velocidad_medida = 0;
     configuracion.velocidad_objetivo = 0;
     configuracion.t_aceleracion = 0;
@@ -185,7 +176,6 @@ void task_control(void *params) {
     pwm_set_enabled(slice, true); // Habilita el pwm
 
     xQueuePeek(cola_pid, &pid, portMAX_DELAY);
-    //printf("\nkp=%.1f ki=%.1f kd=%.3f\n", pid.kp, pid.ki, pid.kd);
 
     TickType_t ultimo_tick = xTaskGetTickCount();
 
@@ -193,23 +183,19 @@ void task_control(void *params) {
         vTaskDelayUntil(&ultimo_tick, pdMS_TO_TICKS(T_PID)); // Espera el tiempo del PID
         xQueuePeek(cola_configuracion, &configuracion, portMAX_DELAY);
 
-        // Verificamos cambio de configuracion y finalizacion de rampa anterior
+        // Verificamos cambio de configuracion y pulsacion del encoder
         if(xSemaphoreTake(semaforo_pulsador, 0) == pdTRUE && configuracion.velocidad_objetivo != velocidad_objetivo_anterior) {
             if(velocidad_objetivo_anterior == 0) { // Si antes estaba parado debemos definir los pines de direccion
-                if(configuracion.velocidad_objetivo > 0) {
+                if(configuracion.velocidad_objetivo > 0) { // Horario
                     gpio_put(IN3, 0);
                     gpio_put(IN4, 1);
-                    gpio_put(LED_HORARIO, 0);
-                    gpio_put(LED_ANTIHORARIO, 1);
                 }
-                else {
+                else { // Antihorario
                     gpio_put(IN3, 1);
                     gpio_put(IN4, 0);
-                    gpio_put(LED_HORARIO, 1);
-                    gpio_put(LED_ANTIHORARIO, 0);
                 }
             }
-
+            // Guardamos nuevos valores 
             velocidad_objetivo_anterior = configuracion.velocidad_objetivo;
             tiempo_aceleracion = configuracion.t_aceleracion * 1000; // Lo pasamos a ms
             tiempo_desaceleracion = configuracion.t_desaceleracion * 1000; // Lo pasamos a ms
@@ -223,6 +209,7 @@ void task_control(void *params) {
             else {
                 cambio_sentido = 0; // No hay que cambiar el sentido
                 velocidad_objetivo_actual = velocidad_objetivo_anterior; // Vamos directo al objetivo
+                // Verificamos si hay que acelerar o desacelerar
                 if(fabs((float)velocidad_objetivo_actual) > fabs(set_point)) pendiente = (velocidad_objetivo_actual - set_point) / tiempo_aceleracion;
                 else pendiente = (velocidad_objetivo_actual - set_point) / tiempo_desaceleracion;
             }
@@ -230,18 +217,20 @@ void task_control(void *params) {
 
         // En el caso de no cambiar de sentido solo actualizamos el set_point
         if(cambio_sentido == 0) {
-            set_point += T_PID * pendiente;
+            set_point += T_PID * pendiente; // Actualizamos el set point
+            // Verificamos si nos pasamos del valor objetivo
             if(pendiente < 0 && set_point < velocidad_objetivo_actual) set_point = velocidad_objetivo_actual;
             if(pendiente > 0 && set_point > velocidad_objetivo_actual) set_point = velocidad_objetivo_actual;
             
-            if(velocidad_objetivo_anterior == 0) {
-                if (fabs(configuracion.velocidad_medida) <= 200 && salida_pid == 0) {
+            if(velocidad_objetivo_anterior == 0) { // Verificamos si se planea frenar del todo
+                if (fabs(configuracion.velocidad_medida) <= 200 && salida_pid == 0) { // Damos un margen de 200RPM para el frenado
+                    // Reseteamos las variables de control y apagamos leds
                     error_anterior1 = 0;
                     error_anterior2 = 0;
                     salida_pid_anterior = 0;
                     set_point = 0;
-                    gpio_put(LED_HORARIO, 1);
-                    gpio_put(LED_ANTIHORARIO, 1);
+                    gpio_put(IN3, 1);
+                    gpio_put(IN4, 1);
                 }
             }
             
@@ -261,25 +250,23 @@ void task_control(void *params) {
                     velocidad_objetivo_actual = velocidad_objetivo_anterior;
                     cambio_sentido = 0;
                     pendiente = velocidad_objetivo_actual / tiempo_aceleracion;
-                    gpio_put(LED_HORARIO, 1);
-                    gpio_put(LED_ANTIHORARIO, 1);
+                    gpio_put(IN3, 1);
+                    gpio_put(IN4, 1);
+                    // Dejamos 500ms frenado
                     vTaskDelay(pdMS_TO_TICKS(500));
                     if(gpio_get(IN3) == 1) {
                         gpio_put(IN3, 0);
                         gpio_put(IN4, 1);
-                        gpio_put(LED_HORARIO, 0);
-                        gpio_put(LED_ANTIHORARIO, 1);
                     }
                     else {
                         gpio_put(IN3, 1);
                         gpio_put(IN4, 0);
-                        gpio_put(LED_HORARIO, 1);
-                        gpio_put(LED_ANTIHORARIO, 0);
                     }
                 }
             }
         }
 
+        // Calculamos el error y el PID
         error = fabs(set_point) - fabs(configuracion.velocidad_medida);
         salida_pid = salida_pid_anterior 
                    + (pid.kp + pid.kd / tm) * error 
@@ -314,8 +301,7 @@ void task_switch(void *params) {
         xSemaphoreTake(semaforo_sw, portMAX_DELAY); // Esperamos el semaforo
         vTaskDelay(pdMS_TO_TICKS(T_ANTIRREBOTE)); // Esperamos el tiempo de rebote
 
-        //gpio_set_irq_enabled(SW, GPIO_IRQ_EDGE_RISE, true); // Activamos la interrupcion por flanco ascendende para soltar el boton
-        gpio_set_irq_enabled(SW, GPIO_IRQ_LEVEL_HIGH, true); // Cambio de nivel para soltar el boton, con pulsaciones cortas daba error el anterior
+        gpio_set_irq_enabled(SW, GPIO_IRQ_LEVEL_HIGH, true); // Cambio de nivel para soltar el boton
 
         if(xSemaphoreTake(semaforo_sw, pdMS_TO_TICKS(T_PRESIONADO)) == pdTRUE) { // Esperamos a ver si se suelta el boton
             mensaje.sw = 0; // Se presiono
@@ -369,12 +355,12 @@ void task_encoder(void *params) {
 
 /**
  * @brief Tarea que controla el flujo de datos del programa
+ * Recibe por una cola que evento se activo y en base a eso actualiza la cola de configuracion
  */
 void task_central(void *params) {
     central_t mensaje;
     configuracion_t configuracion;
 
-    configuracion.cambio = 0;
     configuracion.menu = 0;
     configuracion.velocidad_medida = 0;
     configuracion.velocidad_objetivo = 1500;
@@ -383,7 +369,6 @@ void task_central(void *params) {
 
     while(1) {
         xQueueReceive(cola_central, &mensaje, portMAX_DELAY); // Esperamos un mensaje
-        configuracion.cambio = 0; // Reseteamos la configuracion de cambio
 
         switch(mensaje.evento) { // Dependiendo del evento actuamos
             case EVENTO_VELOCIDAD: // Actualizo velocidad
@@ -426,8 +411,7 @@ void task_central(void *params) {
             case EVENTO_SW:
                 if(mensaje.sw == 0) {
                     if(configuracion.menu == 0) {
-                        // COMENZAR CONTROL
-                        configuracion.cambio = 1;
+                        // comienza el control a la velocidad configurada
                         xSemaphoreGive(semaforo_pulsador);
                     }
                     else if(configuracion.menu == 1) configuracion.menu = 2;
@@ -452,6 +436,7 @@ void task_central(void *params) {
 
 /**
  * @brief Tarea que maneja el display LCD
+ * Recibe datos de la cola de configuracion o del datalogger
  */
 void task_lcd(void *params) {
     configuracion_t configuracion;
@@ -560,8 +545,7 @@ void task_sentido(void *params) {
         xSemaphoreTake(semaforo_sentido, portMAX_DELAY); // Esperamos el semaforo
         vTaskDelay(pdMS_TO_TICKS(T_ANTIRREBOTE)); // Esperamos el tiempo de rebote
 
-        //gpio_set_irq_enabled(SW, GPIO_IRQ_EDGE_RISE, true); // Activamos la interrupcion por flanco ascendende para soltar el boton
-        gpio_set_irq_enabled(SENTIDO, GPIO_IRQ_LEVEL_HIGH, true); // Cambio de nivel para soltar el boton, con pulsaciones cortas daba error el anterior
+        gpio_set_irq_enabled(SENTIDO, GPIO_IRQ_LEVEL_HIGH, true); // Cambio de nivel para soltar el boton
 
         if(xSemaphoreTake(semaforo_sentido, pdMS_TO_TICKS(T_PRESIONADO)) == pdTRUE) { // Esperamos a ver si se suelta el boton
             mensaje.sw = 0; // Se presionó (Cambio de sentido)
@@ -610,7 +594,8 @@ void task_calibrar(void *params) {
 }
 
 /**
- * @brief Tarea que maneja el sistema de archivos, guarda de a 10 datos
+ * @brief Tarea que maneja el sistema de archivos, guarda de a 5 datos
+ * Tiene verificaciones de conexion, desconexion, de error de creacion
  */
 void task_datalogger(void *params) {
     time_t horas[5]; // Para almacenar 10 horas distintas 
@@ -620,7 +605,6 @@ void task_datalogger(void *params) {
     float frecuencias[5]; // Para almacenar 10 frecuencias del sensor distintas
     char sentido[5]; // Para guardar 10 caracteres que indican sentido (H o A)
     float dc[5]; // Para almacenas 10 ciclos de actividad distintos
-    uint16_t demora = 1000;
 
     uint canal = pwm_gpio_to_channel(ENB); // Canal de pwm usado
     uint slice_usado = pwm_gpio_to_slice_num(ENB); // Slice de pwm usado
@@ -645,15 +629,15 @@ void task_datalogger(void *params) {
     TickType_t ultimo_tick = xTaskGetTickCount();
 
     while(1) {
-        vTaskDelayUntil(&ultimo_tick, pdMS_TO_TICKS(demora));
+        vTaskDelayUntil(&ultimo_tick, pdMS_TO_TICKS(1000));
         xQueuePeek(cola_configuracion, &configuracion, portMAX_DELAY);
-        if(sd == false) {
+
+        if(sd == false) { // Si no se cargo una SD
             resultado = f_mount(&fs, "", 1); // Trata de montar SD
             if(resultado == FR_OK) { // Si se logra
                 error_mostrado = false; // Desactivamos el mostrado de error
                 sd = true; // Indicamos que se leyo la sd
-                datos = 0;
-                demora = 500;
+                datos = 0; // Reseteamos el indice de los datos guardados
 
                 if(archivo == true) { // En caso de que ya se haya creado el archivo verificamos si se cambió de SD
                     resultado = f_open(&file, nombre_archivo, FA_WRITE | FA_OPEN_APPEND); // Tratamos de abrir para agregar más datos
@@ -667,7 +651,7 @@ void task_datalogger(void *params) {
                     }
                 }
 
-                if(archivo_pid == false) {
+                if(archivo_pid == false) { // Si no se creo el archivo de datos de PID lo creamos
                     archivo_pid = true;
                     resultado = f_open(&file, "pid.txt", FA_OPEN_ALWAYS | FA_WRITE);
                     if(resultado != FR_OK) printf("Error");
@@ -697,56 +681,62 @@ void task_datalogger(void *params) {
                             f_close(&file); // Si se pudo leer cerramos el archivo
                         }
                     }
-                    if(error_mostrado == false && i == MAX_ARCHIVOS) {
+                    if(error_mostrado == false && i == MAX_ARCHIVOS) { // Tarjeta SD llena
                         error_mostrado = true;
                         mensaje_sd = 1;
                         xQueueSendToBack(cola_mensaje_sd, &mensaje_sd, portMAX_DELAY);
                     }
                 }
             }
-            else if(error_mostrado == false) {
+            else if(error_mostrado == false) { // Error en montaje
                 error_mostrado = true;
                 mensaje_sd = 2;
                 xQueueSendToBack(cola_mensaje_sd, &mensaje_sd, portMAX_DELAY);
             }
         }
-        else {
+        else { // Ya esta conectada la SD
             xSemaphoreTake(semaforo_i2c, portMAX_DELAY);
-            horas[datos] = rtc_get_time();
+            horas[datos] = rtc_get_time(); // Obtenemos hora y fecha
             xSemaphoreGive(semaforo_i2c);
-            velocidades[datos] = configuracion.velocidad_medida;
-            frecuencias[datos] = configuracion.velocidad_medida * RANURAS / 120.0;
+            velocidades[datos] = configuracion.velocidad_medida; // Guardamos la velocidad actual
+            frecuencias[datos] = configuracion.velocidad_medida * RANURAS / 120.0; // Calculamos la frecuencia del sensor
+            // Obtenemos el nivel del PWM en base al registro ya que no tenia funcion en el SDK
             if(canal == 0) nivel_pwm = pwm_hw->slice[slice_usado].cc & 0xFFFF;
             else nivel_pwm = (pwm_hw->slice[slice_usado].cc >> 16) & 0xFFFF;
-            dc[datos] = nivel_pwm * 100.0 / 2000.0;
-            if(gpio_get(IN3) == 0) sentido[datos] = 'H';
-            else sentido[datos] = 'A';
+            dc[datos] = nivel_pwm * 100.0 / 2000.0; // Calculamos el ciclo de actividad con el nivel del PWM
+            // Verificamos el sentido o si esta parado
+            if(gpio_get(IN3) == 1) {
+                if(gpio_get(IN4) == 1) sentido[datos] = 'P';
+                else sentido[datos] = 'A';
+            }
+            else sentido[datos] = 'H';
+            // Verificamos cambio de hora
             if(datos > 0) {
                 if(horas[datos].second != horas[datos - 1].second) datos++;
             }
             if(datos == 0) {
                 if(horas[datos].second != horas[4].second) datos++;
             }
+            // Si se llena el buffer hay que guardar
             if(datos == 5) {
                 resultado = f_open(&file, nombre_archivo, FA_WRITE | FA_OPEN_APPEND);
-                if(resultado != FR_OK) {
+                if(resultado != FR_OK) { // Si no se pudo abrir indicamos que se desconecto la SD
                     mensaje_sd = 4;
                     xQueueSendToBack(cola_mensaje_sd, &mensaje_sd, portMAX_DELAY);
                     sd = false;
                     error_mostrado = true;
                     datos = 0;
-                    demora = 1000;
                 }
-                else {
-                    for(datos = 0; datos < 5; datos++) {
-                        //Guardar
+                else { // Se pudo abrir el archivo
+                    for(datos = 0; datos < 5; datos++) { 
+                        //Guardamos los 5 datos
                         sprintf(buffer,"%02d/%02d/%04d;%02d:%02d:%02d;%4.0f;%6.1f;%3.1f;%c\n",
                             horas[datos].day, horas[datos].month, horas[datos].year,
                             horas[datos].hour, horas[datos].minute, horas[datos].second,
                             velocidades[datos], frecuencias[datos], dc[datos], sentido[datos]);
                         resultado = f_write(&file, buffer, strlen(buffer), &bw);
                     }
-                    f_close(&file);
+                    f_close(&file); // Cerramos el archivo
                 }
                 datos = 0;
             }
@@ -756,6 +746,7 @@ void task_datalogger(void *params) {
 
 /**
  * @brief Tarea para ajustar PID por grilla de valores
+ * En base a valores obtenidos experimentalmente verificamos la mejor combinacion 
  */
 void task_tune(void *params) {
     configuracion_t velocidad;
@@ -772,14 +763,17 @@ void task_tune(void *params) {
     lcd_set_cursor(0, 0);
     lcd_string("Calibrando");
     
-    for(uint8_t i = 0; i < 3; i++) {
-        for(uint8_t j = 0; j < 4; j++) {
-            for(uint8_t k = 0; k < 3; k++) {
-                for(uint8_t t = 0; t < 42; t++) {
+    for(uint8_t i = 0; i < 3; i++) { // Recorremos los kp
+        for(uint8_t j = 0; j < 4; j++) { // Recorremos los ki
+            for(uint8_t k = 0; k < 3; k++) { // Recorremos los kd
+                // Establecemos el sentido
+                gpio_put(IN3, 0); 
+                gpio_put(IN4, 1); 
+                for(uint8_t t = 0; t < 42; t++) { // Aplicamos el PID durante 42 ciclos
                     vTaskDelayUntil(&ultimo_tick, pdMS_TO_TICKS(T_PID));
                     xQueuePeek(cola_configuracion, &velocidad, portMAX_DELAY);
                     error = 1500 - fabs(velocidad.velocidad_medida);
-                    error_total += fabs(error);
+                    error_total += fabs(error); // Acumulamos el error total
                     salida_pid = salida_pid_anterior 
                                 + (kp[i] + kd[k] / tm) * error 
                                 + (-kp[i] + ki[j] * tm - 2 * kd[k] / tm) * error_anterior1 
@@ -794,8 +788,9 @@ void task_tune(void *params) {
                     if(salida_pid < 360) salida_pid = 0;
                     pwm_set_gpio_level(ENB, (uint16_t) salida_pid);                
                 }
-                //printf("kp=%.1f ki=%.1f kd=%.3f error=%.2f vel_fin: %.0f\n", kp[i], ki[j], kd[k], error_total, velocidad.velocidad_medida);
-                pwm_set_gpio_level(ENB, 0);   
+                pwm_set_gpio_level(ENB, 0);  
+                gpio_put(IN3, 1);
+                gpio_put(IN4, 1); 
                 vTaskDelay(300); // Esperamos a que se frene
                 salida_pid_anterior = 0;
                 error_anterior1 = 0;
@@ -812,6 +807,7 @@ void task_tune(void *params) {
     }
     xQueueSendToBack(cola_pid, &parametros_finales, portMAX_DELAY); // Enviamos los parametros a control
     
+    // Activamos el resto de interrupciones
     gpio_set_irq_enabled(SENTIDO, GPIO_IRQ_EDGE_FALL, true);
     gpio_set_irq_enabled(SW, GPIO_IRQ_EDGE_FALL, true);
 
@@ -857,6 +853,7 @@ void task_tune(void *params) {
 
 /**
  * @brief Tarea para setear hora
+ * Inicia mostrando la hora y permite su modificacion, luego se procede a la calibracion
  */
 void task_seteo(void *params) {
     central_t encoder;
@@ -869,8 +866,8 @@ void task_seteo(void *params) {
         if(cambiar_hora == 0) xQueueReceive(cola_central, &encoder, pdMS_TO_TICKS(100));
         else xQueueReceive(cola_central, &encoder, portMAX_DELAY);
 
-        if(encoder.evento == EVENTO_CALIBRAR) {
-            if(encoder.sw == 0) {
+        if(encoder.evento == EVENTO_CALIBRAR) { 
+            if(encoder.sw == 0) { // Si se pulso activamos la configuracoin y cambiamos entre valores
                 cambiar_hora = 1;
                 unidad++;
                 if(unidad == 7) unidad = 1;
@@ -880,8 +877,10 @@ void task_seteo(void *params) {
                     rtc_set_time(hora);
                 }
 
+                // Activamos la interrupcion para leer la velocidad
                 gpio_set_irq_enabled(SENSOR_IR, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true);
 
+                // Creamos las tareas de lectura de velocidad, control, central y de tuneo
                 xTaskCreate(
                     task_velocidad, 
                     "task_velocidad", 
@@ -918,16 +917,17 @@ void task_seteo(void *params) {
                     NULL
                 );
 
+                // Inhabilitamos la interrupcion del boton calibrar, borramos su tarea y esta tarea tambien
                 gpio_set_irq_enabled(CALIBRAR, GPIO_IRQ_EDGE_FALL | GPIO_IRQ_LEVEL_HIGH, false);
                 vTaskDelete(boton_calibrar);
                 vTaskDelete(NULL);
             }
         }
 
-        if(cambiar_hora == 0) {
+        if(cambiar_hora == 0) { // Obtenemos la hora
             hora = rtc_get_time();
         }
-        else {
+        else { // Cambiamos la hora
             if(encoder.evento == EVENTO_ENCODER) {
                 switch(unidad) {
                     case 1:
@@ -994,6 +994,7 @@ void task_seteo(void *params) {
             }
         }
         
+        // Mostramos la hora medida o modificada
         lcd_set_cursor(0, 0);
         sprintf(fecha, "%02d/%02d/%02d", hora.day, hora.month, hora.year - 2000);
         lcd_string(fecha);
@@ -1036,7 +1037,7 @@ int main() {
     // Inicializacion pin IN3 del puente H
     gpio_init(IN3);
     gpio_set_dir(IN3, GPIO_OUT);
-    gpio_put(IN3, 0); // Sentido 1
+    gpio_put(IN3, 1); // Sentido 1
     
     // Inicializacion pin IN4 del puente H
     gpio_init(IN4);
@@ -1045,14 +1046,6 @@ int main() {
     
     // Seteo la funcion del PWM
     gpio_set_function(ENB, GPIO_FUNC_PWM);
-
-    // Inicializacion pin de leds
-    gpio_init(LED_HORARIO);
-    gpio_set_dir(LED_HORARIO, GPIO_OUT);
-    gpio_put(LED_HORARIO, 1);
-    gpio_init(LED_ANTIHORARIO);
-    gpio_set_dir(LED_ANTIHORARIO, GPIO_OUT);
-    gpio_put(LED_ANTIHORARIO, 1);
 
     // Inicio LCD
     // Inicializo el I2C con un clock de 100 KHz
@@ -1071,9 +1064,6 @@ int main() {
     // Habilitacion de interrupciones GPIO
     gpio_set_irq_enabled_with_callback(CLK, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true, gpio_irq_handler);
     gpio_set_irq_enabled(CALIBRAR, GPIO_IRQ_EDGE_FALL, true);
-    //gpio_set_irq_enabled(SW, GPIO_IRQ_EDGE_FALL, true);
-    //gpio_set_irq_enabled(SENSOR_IR, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true);
-    //gpio_set_irq_enabled(SENTIDO, GPIO_IRQ_EDGE_FALL, true);
 
     // Creacion de semaforos y colas
     semaforo_sw = xSemaphoreCreateBinary();
