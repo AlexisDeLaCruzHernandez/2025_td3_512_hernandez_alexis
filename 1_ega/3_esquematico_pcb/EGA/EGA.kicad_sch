@@ -10286,7 +10286,7 @@
 				)
 			)
 		)
-		(property "Value" "330"
+		(property "Value" "180"
 			(at 72.39 107.95 90)
 			(effects
 				(font
@@ -11071,7 +11071,7 @@
 				)
 			)
 		)
-		(property "Value" "330"
+		(property "Value" "180"
 			(at 72.39 96.52 90)
 			(effects
 				(font

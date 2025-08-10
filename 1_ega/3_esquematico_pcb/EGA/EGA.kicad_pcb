@@ -4495,7 +4495,7 @@
 				)
 			)
 		)
-		(property "Value" "330"
+		(property "Value" "180"
 			(at 5.08 2.37 90)
 			(layer "F.Fab")
 			(uuid "5c13546f-ba33-4396-aaa6-40c6a488ac8b")
@@ -10882,7 +10882,7 @@
 				)
 			)
 		)
-		(property "Value" "330"
+		(property "Value" "180"
 			(at 5.08 2.37 90)
 			(layer "F.Fab")
 			(uuid "fe9d0ff3-45fb-4637-9959-80f1270a7613")
