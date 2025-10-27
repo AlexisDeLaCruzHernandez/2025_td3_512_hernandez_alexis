@@ -1,5 +1,5 @@
 # Etiqueta para definir el nombre del archivo con el codigo del modulo
-FILE := kernel_modulw
+FILE := kernel_module
 # Define el autor del modulo (coincide con el del codigo del modulo)
 AUTHOR := Hernandez-Jorja
 # Directorio donde se encuentra el kernel

@@ -12,7 +12,7 @@
 #define CHRDEV_COUNT 1
 
 // Variable que guarda los major y minor numbers del char device
-static dev_t chrder_number;
+static dev_t chrdev_number;
 // Variable que representa el char device
 static struct cdev chrdev;
 // Clase del char device
@@ -62,7 +62,7 @@ static ssize_t chr_dev_write(struct file *f, const char __user *buff, size_t siz
     // Variables auxiliares
     int to_copy, not_copied, copied;
     // Se fija cuanto puede copiar sin exceder el shared buffer
-    to_copy = min(size, sizeof(shared_buffer));
+    to_copy = min(size, sizeof(shared_buffer) - 1);
     // Copia del user space al kernel space, devuelve cuanto no se copio
     not_copied = copy_from_user(shared_buffer, buff, to_copy);
     // Evalua cuanto se copio efectivamente
@@ -84,7 +84,7 @@ static ssize_t chr_dev_write(struct file *f, const char __user *buff, size_t siz
  * @brief Crea el char device
  * @return Devuelve cero si la inicializacion fue correcta
  */
-static void __init module_kernel_init(void) {
+static int __init module_kernel_init(void) {
     // Reservar char device
     if(alloc_chrdev_region(&chrdev_number, CHRDEV_MINOR, CHRDEV_COUNT, AUTHOR) < 0) {
         printk(KERN_ERR "%s: No se pudo crear el char device\n", AUTHOR);
@@ -128,6 +128,7 @@ static void __exit module_kernel_exit(void) {
     class_destroy(chrdev_class);
     unregister_chrdev_region(chrdev_number, CHRDEV_COUNT);
     cdev_del(&chrdev);
+    printk(KERN_INFO "%s: Modulo removido\n", AUTHOR);
 }
 
 // Funciones de inicializacion y salida
@@ -135,6 +136,6 @@ module_init(module_kernel_init);
 module_exit(module_kernel_exit);
 
 // Informacion del modulo
-MODULO_LICENSE("GPL");
+MODULE_LICENSE("GPL");
 MODULE_AUTHOR(AUTHOR);
 MODULE_DESCRIPTION("Modulo de kernel EGB");
