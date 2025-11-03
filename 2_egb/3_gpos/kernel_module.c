@@ -8,6 +8,7 @@
 #include <linux/of_device.h>
 #include <linux/of.h>
 #include <linux/uaccess.h>
+#include <linux/wait.h>
 
 // Autor del modulo
 #define AUTHOR              "Hernandez-Jorja"
@@ -38,9 +39,10 @@ static struct of_device_id serdev_ids[] = {
 MODULE_DEVICE_TABLE(of, serdev_ids);
 // Serdev Device
 static struct serdev_device *g_serdev = NULL;
-
 // Buffer de datos para compartir entre user y kernel
 static char shared_buffer[SHARED_BUFFER_SIZE];
+static int recibido = 0, recibido_size = 0;
+static wait_queue_head_t waitqueue;
 
 // Prototipos de los callbacks de fops
 static ssize_t chr_dev_read(struct file *f, char __user *buff, size_t size, loff_t *off);
@@ -77,21 +79,22 @@ static const struct serdev_device_ops egb_uart_ops = {
  * @brief Operacion si se lee el char device
  */
 static ssize_t chr_dev_read(struct file *f, char __user *buff, size_t size, loff_t *off) {
-    // Variables auxiliares
-    int to_copy, not_copied;
-    // Se fija cuanto hay que copiar, fijandose si la cantidad
-    // a leer o lo que queda del buffer es menor. Evita leer 
-    // fuera de los limites del buffer
-    to_copy = min(size, sizeof(shared_buffer) - *off);
-    // Si el offset es mas grande al buffer compartido no hay
-    // mas para leer -> return 0 para indicar EOF
-    if(*off >= to_copy) return 0;
-    // Copia del kernel space al user space, devuelve cuanto no se copio
-    not_copied = copy_to_user(buff, shared_buffer + *off, to_copy);
-    // actualiza el offset
-    *off = to_copy - not_copied;
-    // Retorna la cantidad copiada
-    return to_copy - not_copied;
+    int not_copied;
+    // Si el usuario ya leyo un dato terminamos la lectura
+    if(*off > 0) {
+        printk(KERN_INFO "%s: Termino de leer\n", AUTHOR);
+	    return 0;
+    }
+    // Bloqueamos hasta recibir dato por UART
+    wait_event_interruptible(waitqueue, recibido == 1);
+    // Copiamos al usuario
+    not_copied = copy_to_user(buff, shared_buffer, recibido_size);
+    // Actualizamos el offset
+    *off = recibido_size - not_copied;
+    // Limpiamos el flag para volver a bloquear
+    recibido = 0;
+    printk(KERN_INFO "%s: Leido del char device '%s'\n", AUTHOR, shared_buffer);
+    return recibido_size - not_copied;
 }
 
 /**
@@ -106,11 +109,15 @@ static ssize_t chr_dev_write(struct file *f, const char __user *buff, size_t siz
     not_copied = copy_from_user(shared_buffer, buff, to_copy);
     // Agrego el \0 por el cuando uso el comando echo
     for(int i = 0; i < to_copy - not_copied; i++) {
+        if(shared_buffer[i] == '\0') {
+            len = i + 1;
+            break;
+        }
         if(shared_buffer[i] == '\n') {
-	    shared_buffer[i] = '\0';
-	    len = i + 1;
-	    break;
-	}
+	        shared_buffer[i] = '\0';
+	        len = i + 1;
+	        break;
+	    }
     }
     // Hago un print de lo que se escribio efectivamente
     printk("%s: Escrito sobre /dev/%s - %s\n", AUTHOR, CHRDEV_NAME, shared_buffer);
@@ -164,21 +171,14 @@ static void egb_uart_remove(struct serdev_device *serdev) {
  * @brief Operacion si se reciben caracteres de UART
  */
 static size_t egb_uart_recv(struct serdev_device *serdev, const unsigned char *buffer, size_t size) {
-    static char str[SHARED_BUFFER_SIZE] = {0};
-    static int i = 0;
-    for(size_t j = 0; j <size; j++){
-        // Se copia el caracter
-        str[i++] = buffer[j];
-        printk(KERN_INFO "%s: Recibido %c\n", AUTHOR, str[i-1]);
-        // Se verifica el fin de cadena
-        if(i == SHARED_BUFFER_SIZE || str[i-1] == '\0') {
-            // Imprimo
-            printk(KERN_INFO "%s: Se recibieron %d bytes por UART. El mensaje fue '%s'\n", AUTHOR, i-1, str);
-            // Reinicio de variables
-       	    memset(str, 0, i);
-    	    i = 0;
-        }
-    }
+    int to_copy = min(size, SHARED_BUFFER_SIZE - 1);
+    memcpy(shared_buffer, buffer, to_copy);
+    shared_buffer[to_copy] = '\0';
+    recibido_size = to_copy;
+    recibido = 1;
+    printk(KERN_INFO "%s: Recibido por UART: '%s'\n", AUTHOR, shared_buffer);
+
+    wake_up_interruptible(&waitqueue);
     return size;
 }
 
@@ -187,6 +187,7 @@ static size_t egb_uart_recv(struct serdev_device *serdev, const unsigned char *b
  * @return Devuelve cero si la inicializacion fue correcta
  */
 static int __init module_kernel_init(void) {
+    init_waitqueue_head(&waitqueue);
     // Reservar char device
     if(alloc_chrdev_region(&chrdev_number, CHRDEV_MINOR, CHRDEV_COUNT, AUTHOR) < 0) {
         printk(KERN_ERR "%s: No se pudo crear el char device\n", AUTHOR);
