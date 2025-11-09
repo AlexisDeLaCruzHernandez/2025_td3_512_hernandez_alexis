@@ -71,6 +71,7 @@ target_link_libraries(firmware
         hardware_spi
         hardware_pwm
         hardware_clocks
+        hardware_uart
 )
 
 # Add the standard include files to the build

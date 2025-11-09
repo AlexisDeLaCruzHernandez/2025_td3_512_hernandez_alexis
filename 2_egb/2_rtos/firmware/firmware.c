@@ -4,6 +4,7 @@
 #include "pico/stdlib.h"
 #include "hardware/pwm.h"
 #include "hardware/clocks.h"
+#include "hardware/uart.h"
 
 #include "lcd.h"
 #include "rtc.h"
@@ -414,6 +415,7 @@ void task_central(void *params) {
     configuracion.velocidad_objetivo = 1500;
     configuracion.t_aceleracion = 5;
     configuracion.t_desaceleracion = 5;
+    xQueueOverwrite(cola_configuracion, &configuracion);
 
     while(1) {
         xQueueReceive(cola_central, &mensaje, portMAX_DELAY); // Esperamos un mensaje
@@ -649,7 +651,7 @@ void task_calibrar(void *params) {
 void task_datalogger(void *params) {
     time_t horas[5]; // Para almacenar 10 horas distintas 
     configuracion_t configuracion; // Para obtener la velocidad
-    parametros_t pid; // Para guardar las constantes del PID
+    parametros_t pid, pid_anterior; // Para guardar las constantes del PID
     float velocidades[5]; // Para almacenar 10 velocidades distintas
     float frecuencias[5]; // Para almacenar 10 frecuencias del sensor distintas
     char sentido[5]; // Para guardar 10 caracteres que indican sentido (H o A)
@@ -674,6 +676,7 @@ void task_datalogger(void *params) {
     char buffer[38];
 
     xQueuePeek(cola_pid, &pid, portMAX_DELAY);
+    pid_anterior = pid;
     xQueueSendToBack(cola_sd, &estado_sd, portMAX_DELAY);
 
     TickType_t ultimo_tick = xTaskGetTickCount();
@@ -681,6 +684,7 @@ void task_datalogger(void *params) {
     while(1) {
         vTaskDelayUntil(&ultimo_tick, pdMS_TO_TICKS(1000));
         xQueuePeek(cola_configuracion, &configuracion, portMAX_DELAY);
+        xQueuePeek(cola_pid, &pid, portMAX_DELAY);
 
         if(sd == false) { // Si no se cargo una SD
             resultado = f_mount(&fs, "", 1); // Trata de montar SD
@@ -694,6 +698,8 @@ void task_datalogger(void *params) {
                     if(resultado == FR_OK) { // Se reconectó la SD
                         mensaje_sd = 3;
                         xQueueSendToBack(cola_mensaje_sd, &mensaje_sd, portMAX_DELAY);
+                        estado_sd = 1;
+                        xQueueOverwrite(cola_sd, &estado_sd);
                     }
                     else { // Se conectó otra SD
                         resultado = f_lseek(&file, f_size(&file));
@@ -792,6 +798,14 @@ void task_datalogger(void *params) {
                 }
                 datos = 0;
             }
+            if(pid_anterior.kp != pid.kp || pid_anterior.kd != pid.kd || pid_anterior.ki != pid.ki) {
+                pid_anterior = pid;
+                resultado = f_open(&file, "pid.txt", FA_OPEN_ALWAYS | FA_WRITE);
+                resultado = f_lseek(&file, f_size(&file));
+                sprintf(buffer, "kp = %.1f; ki = %.1f; kd = %.3f\n", pid.kp, pid.ki, pid.kd);
+                resultado = f_write(&file, buffer, strlen(buffer), &bw);
+                f_close(&file);
+            }
         }
     }
 }
@@ -858,7 +872,7 @@ void task_tune(void *params) {
             }
         }
     }
-    xQueueSendToBack(cola_pid, &parametros_finales, portMAX_DELAY); // Enviamos los parametros a control
+    xQueueOverwrite(cola_pid, &parametros_finales); // Enviamos los parametros a control
 
     inicio = 2;
     xQueueOverwrite(cola_inicio, &inicio); // Indicamos fin de calibracion
@@ -940,9 +954,10 @@ void task_seteo(void *params) {
             else {
                 if(cambiar_hora == 1) {
                     rtc_set_time(hora);
-                    inicio = 1;
-                    xQueueOverwrite(cola_inicio, &inicio);
                 }
+
+                inicio = 1;
+                xQueueOverwrite(cola_inicio, &inicio);
 
                 // Activamos la interrupcion para leer la velocidad
                 gpio_set_irq_enabled(SENSOR_IR, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true);
@@ -953,7 +968,7 @@ void task_seteo(void *params) {
                     "task_velocidad", 
                     configMINIMAL_STACK_SIZE, 
                     NULL, 
-                    tskIDLE_PRIORITY + 1, 
+                    tskIDLE_PRIORITY + 2, 
                     NULL
                 );
                 
@@ -1150,19 +1165,23 @@ void task_uart(void *params) {
                                 &fecha_hora.hour,
                                 &fecha_hora.minute,
                                 &fecha_hora.second,
-                                &fecha_hora.day,
+                                &fecha_hora.date,
                                 &fecha_hora.month,
                                 &fecha_hora.year
                             );
                             fecha_hora.year += 2000;
+                            fecha_hora.day = 1;
+                            strcpy(out_buff, "Set ok");
                             rtc_set_time(fecha_hora);
                             // Indicamos que se realizo la configuracion de la fecha y hora
                             inicio = 1;
                             xQueueOverwrite(cola_inicio, &inicio);
                         }
-                        else uart_puts(UART_ID, "Configurar hora");
+                        if(variable_i != VAR_TIM) strcpy(out_buff, "Configurar hora");
+                        break;
                     case 1:
-                        uart_puts(UART_ID, "Calibrando...");
+                        strcpy(out_buff, "Calibrando...");
+                        break;
                     case 2:
                         xQueuePeek(cola_configuracion, &config_uart, portMAX_DELAY);
                         xQueuePeek(cola_pid, &pid_params, portMAX_DELAY);
@@ -1179,10 +1198,10 @@ void task_uart(void *params) {
                                     sprintf(out_buff, "ki=%.2f", pid_params.ki);
                                     break;
                                 case VAR_VOB:
-                                    sprintf(out_buff, "Vob=%+05d", config_uart.velocidad_objetivo);
+                                    sprintf(out_buff, "Vob=%+5d", config_uart.velocidad_objetivo);
                                     break;
                                 case VAR_VME:
-                                    sprintf(out_buff, "Vm=%+05d", config_uart.velocidad_medida);
+                                    sprintf(out_buff, "Vm=%+5.0f", config_uart.velocidad_medida);
                                     break;
                                 case VAR_TAC:
                                     sprintf(out_buff, "Ta=%.1f", config_uart.t_aceleracion);
@@ -1204,7 +1223,6 @@ void task_uart(void *params) {
                                     sprintf(out_buff, "SD=%s", (sd == 1) ? "On" : "Off");
                                     break;
                             }
-                            uart_puts(UART_ID, out_buff);
                         }
                         else {
                             // Procesamiento de configurar
@@ -1241,18 +1259,20 @@ void task_uart(void *params) {
                                         &fecha_hora.hour,
                                         &fecha_hora.minute,
                                         &fecha_hora.second,
-                                        &fecha_hora.day,
+                                        &fecha_hora.date,
                                         &fecha_hora.month,
                                         &fecha_hora.year
                                     );
                                     fecha_hora.year += 2000;
+                                    fecha_hora.day = 1;
                                     rtc_set_time(fecha_hora);
                                     break;
                             }
-                            uart_puts(UART_ID, "Set ok");
+                            strcpy(out_buff, "Set ok");
                         }
                         break;
                 }
+                uart_puts(UART_ID, out_buff);
             }
         }
         // Control de errores
@@ -1331,6 +1351,7 @@ int main() {
     // Indicamos el formato y activamos la FIFO
     uart_set_format(UART_ID, DATA_BITS, STOP_BITS, PARITY);
     uart_set_fifo_enabled(UART_ID, true);
+    cola_uart = xQueueCreate(BUFF_SIZE, sizeof(char));
 
     // Habilitamos interrupciones por recepcion de UART
     irq_set_exclusive_handler(UART0_IRQ, uart_irq_handler);
@@ -1349,11 +1370,10 @@ int main() {
     semaforo_pulsador = xSemaphoreCreateBinary();
     semaforo_contador = xSemaphoreCreateCounting(400, 0);
     cola_encoder = xQueueCreate(1, sizeof(encoder_t));
-    cola_central = xQueueCreate(1, sizeof(central_t));
+    cola_central = xQueueCreate(10, sizeof(central_t));
     cola_configuracion = xQueueCreate(1, sizeof(configuracion_t));
     cola_mensaje_sd = xQueueCreate(2, sizeof(uint8_t));
     cola_pid = xQueueCreate(1, sizeof(parametros_t));
-    cola_uart = xQueueCreate(BUFF_SIZE, sizeof(char));
     cola_sd = xQueueCreate(1, sizeof(uint8_t));
     cola_inicio = xQueueCreate(1, sizeof(uint8_t));
 
