@@ -104,23 +104,18 @@ static ssize_t chr_dev_write(struct file *f, const char __user *buff, size_t siz
     // Variables auxiliares
     int to_copy, not_copied, len;
     // Se fija cuanto puede copiar sin exceder el shared buffer
-    to_copy = min(size, sizeof(shared_buffer));
+    to_copy = min(size, sizeof(shared_buffer) - 1);
     // Copia del user space al kernel space, devuelve cuanto no se copio
     not_copied = copy_from_user(shared_buffer, buff, to_copy);
-    // Agrego el \0 por el cuando uso el comando echo
-    for(int i = 0; i < to_copy - not_copied; i++) {
-        if(shared_buffer[i] == '\0') {
-            len = i + 1;
-            break;
-        }
-        if(shared_buffer[i] == '\n') {
-	        shared_buffer[i] = '\0';
-	        len = i + 1;
-	        break;
-	    }
-    }
+    // Guardamos la cantidad de datos recibidos:
+    len = to_copy - not_copied;
+    // Usamos otra variable para hacer el printk pero enviar el dato con el \n
+    char printk_buff[SHARED_BUFFER_SIZE];
+    memcpy(printk_buff, shared_buffer, len);
+    printk_buff[len] = '\0';
+    if(len > 0 && printk_buff[len - 1] == '\n') printk_buff[len - 1] = '\0';
     // Hago un print de lo que se escribio efectivamente
-    printk("%s: Escrito sobre /dev/%s - %s\n", AUTHOR, CHRDEV_NAME, shared_buffer);
+    printk("%s: Escrito sobre /dev/%s - %s\n", AUTHOR, CHRDEV_NAME, printk_buff);
     // Se verifica la UART
     if(g_serdev != NULL) {
         // Se envia al UART
@@ -171,14 +166,18 @@ static void egb_uart_remove(struct serdev_device *serdev) {
  * @brief Operacion si se reciben caracteres de UART
  */
 static size_t egb_uart_recv(struct serdev_device *serdev, const unsigned char *buffer, size_t size) {
-    int to_copy = min(size, SHARED_BUFFER_SIZE - 1);
-    memcpy(shared_buffer, buffer, to_copy);
-    shared_buffer[to_copy] = '\0';
-    recibido_size = to_copy;
-    recibido = 1;
-    printk(KERN_INFO "%s: Recibido por UART: '%s'\n", AUTHOR, shared_buffer);
-
-    wake_up_interruptible(&waitqueue);
+    if(size > 3) {
+        int to_copy = min(size, SHARED_BUFFER_SIZE - 1);
+        memcpy(shared_buffer, buffer, to_copy);
+        shared_buffer[to_copy] = '\0';
+        recibido_size = to_copy;
+        recibido = 1;
+        printk(KERN_INFO "%s: Recibido por UART: '%s'\n", AUTHOR, shared_buffer);
+        wake_up_interruptible(&waitqueue);
+    }
+    else {
+        printk(KERN_ERR "%s: Basura recibida por UART\n", AUTHOR);
+    }
     return size;
 }
 
