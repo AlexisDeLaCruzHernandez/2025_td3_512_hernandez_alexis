@@ -93,8 +93,8 @@ def main():
                                 print("-------------------------------------------------")
                                 print("Ingrese velocidad objetivo:")
                                 flush_stdin()
-                                val = float(input("[-2700 a -500 y 500 a 2700 rpm]: "))
-                                if (-2700 <= val <= -500 or 500 <= val <= 2700):
+                                val = float(input("[-2700 a -500, 0 y 500 a 2700 rpm]: "))
+                                if (-2700 <= val <= -500 or 500 <= val <= 2700 or val == 0):
                                     ok = 1
                                 else:
                                     print("Formato inválido. Ej: 2710")
