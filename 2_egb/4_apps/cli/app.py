@@ -17,9 +17,12 @@ def main():
                         msg = "get"
                         menu = 2
                     case "3":
+                        print("-------------------------------------------------")
                         print("Está seguro:")
+                        print("-------------------------------------------------")
                         print("1> Si")
                         print("2> No")
+                        print("-------------------------------------------------")
                         match input("Opción [1-2]: ").strip():
                             case "1":
                                 os.system("clear")
@@ -51,7 +54,7 @@ def main():
                     match opc:
                         case "1": 
                             while ok == 0:
-                                print("-------------------------------------------")
+                                print("-------------------------------------------------")
                                 print("Ingrese kp:")
                                 flush_stdin()
                                 val = float(input("[0.40 a 0.60]: "))
@@ -63,7 +66,7 @@ def main():
                             msg = f"{msg} {val}" 
                         case "2": 
                             while ok == 0:
-                                print("-------------------------------------------")
+                                print("-------------------------------------------------")
                                 print("Ingrese kd:")
                                 flush_stdin()
                                 val = float(input("[0.0040 a 0.0060]: "))
@@ -75,7 +78,7 @@ def main():
                             msg = f"{msg} {val}" 
                         case "3": 
                             while ok == 0:
-                                print("-------------------------------------------")
+                                print("-------------------------------------------------")
                                 print("Ingrese ki:")
                                 flush_stdin()
                                 val = float(input("[0.60 a 0.90]: "))
@@ -87,7 +90,7 @@ def main():
                             msg = f"{msg} {val}" 
                         case "4": 
                             while ok == 0:
-                                print("-------------------------------------------")
+                                print("-------------------------------------------------")
                                 print("Ingrese velocidad objetivo:")
                                 flush_stdin()
                                 val = float(input("[-2700 a -500 y 500 a 2700 rpm]: "))
@@ -99,7 +102,7 @@ def main():
                             msg = f"{msg} {val}" 
                         case "5": 
                             while ok == 0:
-                                print("-------------------------------------------")
+                                print("-------------------------------------------------")
                                 print("Ingrese tiempo de aceleración:")
                                 flush_stdin()
                                 val = float(input("[1 a 15 segundos]: "))
@@ -111,7 +114,7 @@ def main():
                             msg = f"{msg} {val}" 
                         case "6":
                             while ok == 0:
-                                print("-------------------------------------------")
+                                print("-------------------------------------------------")
                                 print("Ingrese tiempo de desaceleración:")
                                 flush_stdin()
                                 val = float(input("[1 a 15 segundos]: "))
@@ -122,22 +125,22 @@ def main():
                             val = round(val, 1)
                             msg = f"{msg} {val}" 
                         case "7": 
-                            patron = r"^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$"
+                            patron = r"^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d-(?:0[1-9]|[12]\d|3[01])/(?:0[1-9]|1[0-2])/(?:2[5-9]|[3-9]\d)$"
                             while ok == 0:
-                                print("-------------------------------------------")
+                                print("-------------------------------------------------")
                                 flush_stdin()
-                                hora = input("Ingrese hora (HH:MM:SS): ").strip()
-                                if re.match(patron, hora):
+                                hora = input("Ingrese hora y fecha (hh:mm:ss-DD/MM/AA): ").strip()
+                                if re.fullmatch(patron, hora):
                                     ok = 1
                                 else:
-                                    print("Formato inválido. Ej: 08:30:15")
+                                    print("Formato inválido. Ej: 08:30:15-13/11/25")
                             msg += hora
-                    print("-------------------------------------------")
+                    print("-------------------------------------------------")
                     print(f"Enviado por UART: {msg}")
-                    print("-------------------------------------------")
+                    print("-------------------------------------------------")
                     rta = enviar_uart(msg)
                     print(f"Respuesta: {rta}")
-                    print("-------------------------------------------")
+                    print("-------------------------------------------------")
                     input("Presione tecla para continuar...")
                     menu = 0
             # MENU PARA GET
@@ -159,34 +162,34 @@ def main():
                         flush_stdin()
                         input("Presione tecla para continuar...")
                 if opc in ["1", "2", "3", "4", "5", "6", "7", "8", "9"]:
-                    print("-------------------------------------------")
+                    print("-------------------------------------------------")
                     print(f"Enviado por UART: {msg}")
-                    print("-------------------------------------------")
+                    print("-------------------------------------------------")
                     rta = enviar_uart(msg)
                     print(f"Respuesta: {rta}")
-                    print("-------------------------------------------")
+                    print("-------------------------------------------------")
                     flush_stdin()
                     input("Presione tecla para continuar...")
                     menu = 0
 
 def menu_principal():
     os.system("clear") # Limpiamos la consola
-    print("-------------------------------------------")
-    print("----------{ Aplicación UART EGB }----------")
-    print("-------------------------------------------")
+    print("-------------------------------------------------")
+    print("-------------{ Aplicación UART EGB }-------------")
+    print("-------------------------------------------------")
     print("Ingrese accion a realizar:")
-    print("-------------------------------------------")
+    print("-------------------------------------------------")
     print("1> Enviar configuración")
     print("2> Obtener información")
     print("3> Salir")
-    print("-------------------------------------------")
+    print("-------------------------------------------------")
     flush_stdin()
     return input("Opción [1-3]: ").strip()
 
 def menu_set():
-    print("-------------------------------------------")
+    print("-------------------------------------------------")
     print("Seleccione variable a configurar:")
-    print("-------------------------------------------")
+    print("-------------------------------------------------")
     print("1> kp")
     print("2> kd")
     print("3> ki")
@@ -196,14 +199,14 @@ def menu_set():
     print("7> Hora")
     print("8> Iniciar control")
     print("9> Volver al menu anterior")
-    print("-------------------------------------------")
+    print("-------------------------------------------------")
     flush_stdin()
     return input("Opción [1-9]: ").strip()
 
 def menu_get():
-    print("-------------------------------------------")
+    print("-------------------------------------------------")
     print("Seleccione variable a consultar:")
-    print("-------------------------------------------")
+    print("-------------------------------------------------")
     print("1> kp")
     print("2> kd")
     print("3> ki")
@@ -214,7 +217,7 @@ def menu_get():
     print("8> Ciclo de actividad")
     print("9> Estado SD")
     print("0> Volver al menu anterior")
-    print("-------------------------------------------")
+    print("-------------------------------------------------")
     flush_stdin()
     return input("Opción [0-9]: ").strip()
 
