@@ -712,7 +712,7 @@ void task_datalogger(void *params) {
                     archivo_pid = true;
                     resultado = f_open(&file, "pid.txt", FA_OPEN_ALWAYS | FA_WRITE);
                     resultado = f_lseek(&file, f_size(&file));
-                    sprintf(buffer, "kp = %.1f; ki = %.1f; kd = %.3f\n", pid.kp, pid.ki, pid.kd);
+                    sprintf(buffer, "kp = %.2f; ki = %.2f; kd = %.4f\n", pid.kp, pid.ki, pid.kd);
                     resultado = f_write(&file, buffer, strlen(buffer), &bw);
                     f_close(&file);
                 }
@@ -802,7 +802,7 @@ void task_datalogger(void *params) {
                 pid_anterior = pid;
                 resultado = f_open(&file, "pid.txt", FA_OPEN_ALWAYS | FA_WRITE);
                 resultado = f_lseek(&file, f_size(&file));
-                sprintf(buffer, "kp = %.1f; ki = %.1f; kd = %.3f\n", pid.kp, pid.ki, pid.kd);
+                sprintf(buffer, "kp = %.2f; ki = %.2f; kd = %.4f\n", pid.kp, pid.ki, pid.kd);
                 resultado = f_write(&file, buffer, strlen(buffer), &bw);
                 f_close(&file);
             }
@@ -826,9 +826,12 @@ void task_tune(void *params) {
     TickType_t ultimo_tick = xTaskGetTickCount();
     uint8_t inicio;
 
-    lcd_clear();
-    lcd_set_cursor(0, 0);
-    lcd_string("Calibrando");
+    
+    xSemaphoreTake(semaforo_i2c, portMAX_DELAY);
+        lcd_clear();
+        lcd_set_cursor(0, 0);
+        lcd_string("Calibrando");
+    xSemaphoreGive(semaforo_i2c);
     
     for(uint8_t i = 0; i < 3; i++) { // Recorremos los kp
         for(uint8_t j = 0; j < 4; j++) { // Recorremos los ki
@@ -953,7 +956,9 @@ void task_seteo(void *params) {
             }
             else {
                 if(cambiar_hora == 1) {
+                    xSemaphoreTake(semaforo_i2c, portMAX_DELAY);
                     rtc_set_time(hora);
+                    xSemaphoreGive(semaforo_i2c);
                 }
 
                 inicio = 1;
@@ -1007,7 +1012,9 @@ void task_seteo(void *params) {
         }
 
         if(cambiar_hora == 0) { // Obtenemos la hora
+            xSemaphoreTake(semaforo_i2c, portMAX_DELAY);
             hora = rtc_get_time();
+            xSemaphoreGive(semaforo_i2c);
         }
         else { // Cambiamos la hora
             if(encoder.evento == EVENTO_ENCODER) {
@@ -1077,12 +1084,14 @@ void task_seteo(void *params) {
         }
         
         // Mostramos la hora medida o modificada
+        xSemaphoreTake(semaforo_i2c, portMAX_DELAY);
         lcd_set_cursor(0, 0);
         sprintf(fecha, "%02d/%02d/%02d", hora.date, hora.month, hora.year - 2000);
         lcd_string(fecha);
         lcd_set_cursor(1, 0);
         sprintf(fecha, "%02d:%02d:%02d", hora.hour, hora.minute, hora.second);
         lcd_string(fecha);
+        xSemaphoreGive(semaforo_i2c);
     }
 }
 
@@ -1109,7 +1118,7 @@ void task_uart(void *params) {
     time_t fecha_hora;
     configuracion_t config_uart;
     parametros_t pid_params;
-    uint8_t sd;
+    uint8_t sd, len = 0;
     while(1) {
         // Recepcion de comando
         xQueueReceive(cola_uart, &in_buff[i], portMAX_DELAY);
@@ -1171,16 +1180,18 @@ void task_uart(void *params) {
                             );
                             fecha_hora.year += 2000;
                             fecha_hora.day = 1;
-                            strcpy(out_buff, "Set ok");
+                            strcpy(out_buff, "Set ok\n");
+                            xSemaphoreTake(semaforo_i2c, portMAX_DELAY);
                             rtc_set_time(fecha_hora);
+                            xSemaphoreGive(semaforo_i2c);
                             // Indicamos que se realizo la configuracion de la fecha y hora
                             inicio = 1;
                             xQueueOverwrite(cola_inicio, &inicio);
                         }
-                        if(variable_i != VAR_TIM) strcpy(out_buff, "Configurar hora");
+                        if(variable_i != VAR_TIM) strcpy(out_buff, "Configurar hora\n");
                         break;
                     case 1:
-                        strcpy(out_buff, "Calibrando...");
+                        strcpy(out_buff, "Calibrando...\n");
                         break;
                     case 2:
                         xQueuePeek(cola_configuracion, &config_uart, portMAX_DELAY);
@@ -1189,25 +1200,25 @@ void task_uart(void *params) {
                             // Procesamiento de obtener
                             switch(variable_i) {
                                 case VAR_PKP:
-                                    sprintf(out_buff, "kp=%.2f", pid_params.kp);
+                                    sprintf(out_buff, "kp=%.2f\n", pid_params.kp);
                                     break;
                                 case VAR_PKD:
-                                    sprintf(out_buff, "kd=%.4f", pid_params.kd);
+                                    sprintf(out_buff, "kd=%.4f\n", pid_params.kd);
                                     break;
                                 case VAR_PKI:
-                                    sprintf(out_buff, "ki=%.2f", pid_params.ki);
+                                    sprintf(out_buff, "ki=%.2f\n", pid_params.ki);
                                     break;
                                 case VAR_VOB:
-                                    sprintf(out_buff, "Vob=%+5d", config_uart.velocidad_objetivo);
+                                    sprintf(out_buff, "Vob=%+5d\n", config_uart.velocidad_objetivo);
                                     break;
                                 case VAR_VME:
-                                    sprintf(out_buff, "Vm=%+5.0f", config_uart.velocidad_medida);
+                                    sprintf(out_buff, "Vm=%+5.0f\n", config_uart.velocidad_medida);
                                     break;
                                 case VAR_TAC:
-                                    sprintf(out_buff, "Ta=%.1f", config_uart.t_aceleracion);
+                                    sprintf(out_buff, "Ta=%.1f\n", config_uart.t_aceleracion);
                                     break;
                                 case VAR_TDE:
-                                    sprintf(out_buff, "Td=%.1f", config_uart.t_desaceleracion);
+                                    sprintf(out_buff, "Td=%.1f\n", config_uart.t_desaceleracion);
                                     break;
                                 case VAR_PWM:
                                     uint canal = pwm_gpio_to_channel(ENB); // Canal de pwm usado
@@ -1216,11 +1227,11 @@ void task_uart(void *params) {
                                     if(canal == 0) nivel_pwm = pwm_hw->slice[slice_usado].cc & 0xFFFF;
                                     else nivel_pwm = (pwm_hw->slice[slice_usado].cc >> 16) & 0xFFFF;
                                     float dc = nivel_pwm * 100.0 / 2000.0; // Calculamos el ciclo de actividad con el nivel del PWM
-                                    sprintf(out_buff, "DC=%.1f", dc);
+                                    sprintf(out_buff, "DC=%.1f\n", dc);
                                     break;
                                 case VAR_MEM:
                                     xQueuePeek(cola_sd, &sd, portMAX_DELAY);
-                                    sprintf(out_buff, "SD=%s", (sd == 1) ? "On" : "Off");
+                                    sprintf(out_buff, "SD=%s\n", (sd == 1) ? "On" : "Off");
                                     break;
                             }
                         }
@@ -1265,10 +1276,12 @@ void task_uart(void *params) {
                                     );
                                     fecha_hora.year += 2000;
                                     fecha_hora.day = 1;
+                                    xSemaphoreTake(semaforo_i2c, portMAX_DELAY);
                                     rtc_set_time(fecha_hora);
+                                    xSemaphoreGive(semaforo_i2c);
                                     break;
                             }
-                            strcpy(out_buff, "Set ok");
+                            strcpy(out_buff, "Set ok\n");
                         }
                         break;
                 }
@@ -1277,7 +1290,7 @@ void task_uart(void *params) {
         }
         // Control de errores
         if(error) {
-            sprintf(out_buff, "Error %d", error);
+            sprintf(out_buff, "Error %d\n", error);
             uart_puts(UART_ID, out_buff);
             error = 0;
         }
