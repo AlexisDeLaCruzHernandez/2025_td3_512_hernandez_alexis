@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', path='styles.css') }}">
+
+    <title>Monitoreo de motor DC</title>
+
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  </head>
+
+  <body>
+    <div id="notificacion" class="notificacion"></div>
+
+    <h1 style="text-align:center;">Control de Motor DC</h1>
+
+    <button id="btnToggleSidebar" class="dashboard-button side-button">☰</button>
+
+    <div id="sidebar" class="sidebar">
+      <h3 class="configuracion-titulo">Fecha y hora</h3>
+      <hr class="configuracion-linea">
+
+      <div class="sidebar-calendar">
+        <div class="calendar-field">
+          <label for="fecha" class="calendar-label">Fecha:</label>
+          <input type="date" id="fecha" class="sidebar-input">
+        </div>
+
+        <div class="calendar-field">
+          <label for="hora" class="calendar-label">Hora:</label>
+          <input type="time" id="hora" class="sidebar-input" step="1">
+        </div>
+
+        <button id="btnEnviarFechaHora" class="dashboard-button calendar-send-btn">
+          Enviar
+        </button>
+      </div>
+    </div>
+
+
+    <div class="panel-general">
+      <div class="configuracion-container">
+        <h3 class="configuracion-titulo">Parametros PID</h3>  
+        <hr class="configuracion-linea">
+        <div id="panel-pid"></div>
+      </div>
+
+      <div class="configuracion-container">
+        <h3 class="configuracion-titulo">Configuración</h3>  
+        <hr class="configuracion-linea">
+        <div id="panel-controles"></div>
+      </div>
+
+      <div class="control-general">
+        <button class="dashboard-button" onclick="iniciarControl()" id="btnIniciar">Iniciar control</button>
+        <button class="dashboard-button" id="btnConsultar">Consultar SD</button>
+        
+        <div class="estado-sd">
+          <span class="estado-label">Estado SD: </span>
+          <span id="estadoValor" class="estado-valor estado-off">Off</span>
+        </div>
+
+        <button class="dashboard-button" id="btnPausar">Iniciar gráfico</button>
+      </div>
+    </div>
+
+    <div id="chart" style="width:90%;height:80vh;margin:auto;"></div>
+
+    <script src="/static/script.js"></script>
+  </body>
+</html>
