@@ -41,7 +41,8 @@ MODULE_DEVICE_TABLE(of, serdev_ids);
 static struct serdev_device *g_serdev = NULL;
 // Buffer de datos para compartir entre user y kernel
 static char shared_buffer[SHARED_BUFFER_SIZE];
-static int recibido = 0, recibido_size = 0;
+static char rx_buff[SHARED_BUFFER_SIZE];
+static int recibido = 0, recibido_size = 0, rx_index = 0;
 static wait_queue_head_t waitqueue;
 
 // Prototipos de los callbacks de fops
@@ -88,12 +89,12 @@ static ssize_t chr_dev_read(struct file *f, char __user *buff, size_t size, loff
     // Bloqueamos hasta recibir dato por UART
     wait_event_interruptible(waitqueue, recibido == 1);
     // Copiamos al usuario
-    not_copied = copy_to_user(buff, shared_buffer, recibido_size);
+    not_copied = copy_to_user(buff, rx_buff, recibido_size);
     // Actualizamos el offset
     *off = recibido_size - not_copied;
     // Limpiamos el flag para volver a bloquear
     recibido = 0;
-    printk(KERN_INFO "%s: Leido del char device '%s'\n", AUTHOR, shared_buffer);
+    printk(KERN_INFO "%s: Leido del char device '%s'\n", AUTHOR, rx_buff);
     return recibido_size - not_copied;
 }
 
@@ -166,17 +167,21 @@ static void egb_uart_remove(struct serdev_device *serdev) {
  * @brief Operacion si se reciben caracteres de UART
  */
 static size_t egb_uart_recv(struct serdev_device *serdev, const unsigned char *buffer, size_t size) {
-    if(size > 3) {
-        int to_copy = min(size, SHARED_BUFFER_SIZE - 1);
-        memcpy(shared_buffer, buffer, to_copy);
-        shared_buffer[to_copy] = '\0';
-        recibido_size = to_copy;
-        recibido = 1;
-        printk(KERN_INFO "%s: Recibido por UART: '%s'\n", AUTHOR, shared_buffer);
-        wake_up_interruptible(&waitqueue);
-    }
-    else {
-        printk(KERN_ERR "%s: Basura recibida por UART\n", AUTHOR);
+    for(size_t i = 0; i < size; i++) {
+        char c = buffer[i];
+        rx_buff[rx_index++] = c;
+        if(rx_index >= SHARED_BUFFER_SIZE) {
+            printk(KERN_INFO "%s: UART overflow", AUTHOR);
+            rx_index = 0;
+        }
+        if(c == '\n') {
+            rx_buff[rx_index] = '\0';
+            recibido_size = rx_index;
+            recibido = 1;
+            printk(KERN_INFO "%s: Recibido linea completa: '%s'\n", AUTHOR, rx_buff);
+            rx_index = 0;
+            wake_up_interruptible(&waitqueue);
+        }
     }
     return size;
 }
